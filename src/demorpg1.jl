@@ -43,7 +43,7 @@ bgcolors = HZPlugin.MANAGER.other
 ########################################################## Game code ############################################
 
 const MONSTER_SPAWN_RATE = 0.5
-player_score = 0
+const player_score = Ref(0)
 
 player_up_anim = [Texture(backend, @crate "..|assets|art|playerGrey_up1.png"::ImageCrate), 
     Texture(backend, @crate "..|assets|art|playerGrey_up2.png"::ImageCrate)]
@@ -101,7 +101,7 @@ mutable struct PlayerCollisionCap
 	PlayerCollisionCap() = new(Dict{AbstractBody, Int}())
 end
 
-getrect(b::AbstractBody) = b.collision
+getrect(b::AbstractBody) = Rect2Df(b.position,b.collision.dimensions)
 render(e::Enemy) = DrawTexture2D(backend, e.current_anim, Rect2Df(e.position..., 3, 3))
 
 function spawn_enemy()
@@ -112,12 +112,16 @@ function spawn_enemy()
     p1, p2 = path.points[i], path.points[wrap(i+1, 1, length(path.points))]
     x,y = rand(min(p1.x, p2.x):max(p1.x, p2.x)), rand(min(p1.y, p2.y):max(p1.y, p2.y))
 	velocity = vrotate(iVec2f(1, 0), acos(x/sqrt(x^2+y^2)) + pi/2) * rand(100:600)
-	push!(game_bodies, Enemy{:ghost}(Vec2f(x,y), velocity, Rect2Df(0,0,30,30), enemy_flying_anim[1]))
+	
+	enemy_pos = Vec2f(x,y)
+	r = Rect2Df(enemy_pos,Vec2f(30,30))
+	push!(game_bodies, Enemy{:ghost}(enemy_pos, velocity, r, enemy_flying_anim[1]))
 end
 
 proc_id = @gamelogic process_enemy begin
+    dt = LOOP_VAR_REF[].delta_seconds
 	for body in game_bodies
-		body.position += body.velocity
+		body.position += body.speed*dt
 	end
 end
 
@@ -129,11 +133,13 @@ end
 
 add_dependency!(app.plugins, proc_id, ren_id)
 
-player = Player(Vec2f(240, 360), 400, Rect2Df(0, 0, 20, 30), player_up_anim[1])
+player_position = Vec2f(240, 360)
+player = Player(player_position, 400, Rect2Df(player_position, Vec2f(20, 30)), player_up_anim[1])
 
-col_id = @gamelogic player_collision capability=PlayerCollisionCap() begin
+col_id = @gamelogic player_collision capability=PlayerCollisionCap() mainthread=true begin
     for body in game_bodies
-    	does_intersect = overlapping(getrect(body), player.collision)
+    	prect = Rect2Df(player.position, player.collision.dimensions)
+    	does_intersect = overlapping(getrect(body), prect)
     	if does_intersect && !haskey(self.capability.colliders, body)
     		self.capability.colliders[body] = 0
     		PLAYER_COLLISION_ENTER.emit = body
@@ -155,7 +161,7 @@ EventNotifiers.connect(PLAYER_COLLISION_ENTER) do body
 	disable_system(ren_id)
 	disable_system(proc_id)
 	println("You died bozos.")
-	clear!(TimerPlugin.TM)
+	TimerPlugin.clear!(TimerPlugin.TM)
 end
 
 EventNotifiers.connect(BODY_SCREEN_EXITED) do body
@@ -206,6 +212,7 @@ end
 add_dependency!(app.plugins, id, id2)
 
 @gameloop begin
-	player_score += LOOP_VAR_REF[].frame_idx % 60 == 0
+	LOOP_VAR_REF[].frame_idx % 30 == 0 && spawn_enemy()
+	player_score[] += LOOP_VAR_REF[].frame_idx % 60 == 0
 	app.ShouldClose && shutdown!()
 end
