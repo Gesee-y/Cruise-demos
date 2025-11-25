@@ -1,25 +1,16 @@
-include(joinpath("..", "..", "AssetCrates.jl", "src", "AssetCrates.jl"))
-
 # This module will load assets
-using .AssetCrates
-
-include(joinpath("..", "..", "Horizons.jl", "src", "CRHorizons.jl"))
-include(joinpath("..", "..", "Cruise.jl", "src", "Cruise.jl"))
-include(joinpath("..", "..", "SDLOutdoors.jl", "src", "SDLOutdoors.jl"))
-include(joinpath("..", "..", "SDLHorizons.jl", "src", "SDLHorizons.jl"))
-
-using .CRHorizons
+using AssetCrates
 
 # We import our engine kernel
-using .Cruise
+using Cruise
 
 # And activate some core plugins
 # Respectively for windowing, rendering and timing
-using .Cruise.ODPlugin, .Cruise.HZPlugin, .Cruise.TimerPlugin
+using Cruise.ODPlugin, Cruise.HZPlugin, Cruise.TimerPlugin
 
 # These 2 modules are backends for windowing and rendering
-using .SDLOutdoors
-using .SDLHorizons
+using SDLOutdoors
+using SDLHorizons
 
 # Just to define a body for our game
 abstract type AbstractBody end
@@ -189,9 +180,9 @@ end
 
 # If there is a collision with the player, we stop the game, we saw enough
 EventNotifiers.connect(PLAYER_COLLISION_ENTER) do body
-	disable_system(col_id)
-	disable_system(ren_id)
-	disable_system(proc_id)
+	#disable_system(col_id)
+	#disable_system(ren_id)
+	#disable_system(proc_id)
 	println("You died bozos.")
 	TimerPlugin.clear!(TimerPlugin.TM)
 end
