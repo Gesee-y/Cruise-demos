@@ -1,5 +1,6 @@
 include(joinpath("..", "..", "AssetCrates.jl", "src", "AssetCrates.jl"))
 
+# This module will load assets
 using .AssetCrates
 
 include(joinpath("..", "..", "Horizons.jl", "src", "CRHorizons.jl"))
@@ -8,22 +9,31 @@ include(joinpath("..", "..", "SDLOutdoors.jl", "src", "SDLOutdoors.jl"))
 include(joinpath("..", "..", "SDLHorizons.jl", "src", "SDLHorizons.jl"))
 
 using .CRHorizons
+
+# We import our engine kernel
 using .Cruise
+
+# And activate some core plugins
+# Respectively for windowing, rendering and timing
 using .Cruise.ODPlugin, .Cruise.HZPlugin, .Cruise.TimerPlugin
+
+# These 2 modules are backends for windowing and rendering
 using .SDLOutdoors
 using .SDLHorizons
 
+# Just to define a body for our game
 abstract type AbstractBody end
 
 # We create a new app
 const app = CruiseApp()
-const Close = Ref(false)
-const assets = CrateManager()
+const assets = CrateManager() # The assets manager
 
+# We add the necessary plugins into our app
 merge_plugin!(app, ODPLUGIN)
 merge_plugin!(app, HZPLUGIN)
 merge_plugin!(app, TIMERPLUGIN)
 
+# He we make inputs map to bind input keys to actions
 @InputMap UP("UP", "W")
 @InputMap LEFT("LEFT", "A")
 @InputMap DOWN("DOWN", "S")
@@ -31,9 +41,10 @@ merge_plugin!(app, TIMERPLUGIN)
 
 window_size = iVec2(480, 720)
 
+# Just to make our life easier
 AssetCrates.getmanager() = assets
 
-# Initialise SDL style window with a SDL renderer
+# Initialise SDL style window and a SDL renderer
 const win = CreateWindow(SDLStyle, "Example", window_size...)
 const backend = InitBackend(SDLRender, GetStyle(win).window, window_size...; bgcol=GRAY)
 const screen = get_texture(backend.viewport.screen)
@@ -44,6 +55,8 @@ bgcolors = HZPlugin.MANAGER.other
 
 const MONSTER_SPAWN_RATE = 0.5
 const player_score = Ref(0)
+
+# The animations we will need for our little game
 
 player_up_anim = [Texture(backend, @crate "..|assets|art|playerGrey_up1.png"::ImageCrate), 
     Texture(backend, @crate "..|assets|art|playerGrey_up2.png"::ImageCrate)]
@@ -61,6 +74,7 @@ game_bodies = AbstractBody[]
 
 ##################################################### PATH STUFFS ###############################################
 
+# Welp this is just some kind of placeholder, not really useful
 mutable struct Path
 	points::Vector{Vec2f}
 end
@@ -69,6 +83,7 @@ path = Path(Vec2f[Vec2f(0,0), Vec2f(window_size.x, 0), Vec2f(window_size...), Ve
 
 ###################################################### Player Stuff #############################################
 
+# Some nesecessary signals to let some actions take place on special conditions
 @Notifyer PLAYER_COLLISION_ENTER(body)
 @Notifyer PLAYER_COLLISION_EXIT(body)
 @Notifyer BODY_SCREEN_EXITED(body)
@@ -87,12 +102,15 @@ mutable struct Enemy{T} <: AbstractBody
 	current_anim::Texture
 end
 
+# This is the capability for our player update struct
+# So system dependent on this will only acces this struct
 mutable struct PlayerUpdateCap
 	current_frame::Int
 	current_animation::Vector{Texture}
 	flip::NTuple{2, Bool}
 end
 
+# Same as above
 mutable struct PlayerCollisionCap
 	colliders::Dict{AbstractBody, Int}
 
@@ -104,13 +122,21 @@ end
 getrect(b::AbstractBody) = Rect2Df(b.position,b.collision.dimensions)
 render(e::Enemy) = DrawTexture2D(backend, e.current_anim, Rect2Df(e.position..., 3, 3))
 
+# Function to spawn enemies
 function spawn_enemy()
 	timer = addtimer!(MONSTER_SPAWN_RATE)
 	ontimeout(spawn_enemy, timer)
     
-    i = rand(1:length(path.points))
+    i = rand(1:length(path.points)) # First we get a random point
+
+    # Then we take the point that follow
+    # The `wrap` is so that if i+1 is greater than the number of point, it will go back to 1
     p1, p2 = path.points[i], path.points[wrap(i+1, 1, length(path.points))]
+
+    # Here we get the x and y positions for our enemy
     x,y = rand(min(p1.x, p2.x):max(p1.x, p2.x)), rand(min(p1.y, p2.y):max(p1.y, p2.y))
+
+    # Some maths to give it a velocity
 	velocity = vrotate(iVec2f(1, 0), acos(x/sqrt(x^2+y^2)) + pi/2) * rand(100:600)
 	
 	enemy_pos = Vec2f(x,y)
@@ -118,6 +144,7 @@ function spawn_enemy()
 	push!(game_bodies, Enemy{:ghost}(enemy_pos, velocity, r, enemy_flying_anim[1]))
 end
 
+# Here we define the logic that will update enemies
 proc_id = @gamelogic process_enemy begin
     dt = LOOP_VAR_REF[].delta_seconds
 	for body in game_bodies
@@ -125,17 +152,21 @@ proc_id = @gamelogic process_enemy begin
 	end
 end
 
+# Here is the logic to render them all
 ren_id = @gamelogic render_enemy begin
 	for body in game_bodies
 		render(body)
 	end
 end
 
+# This dependecy ensure that every enemies has been updated before rendering them
 add_dependency!(app.plugins, proc_id, ren_id)
 
 player_position = Vec2f(240, 360)
 player = Player(player_position, 400, Rect2Df(player_position, Vec2f(20, 30)), player_up_anim[1])
 
+# Here is the collision logic, we handle what happens if a player collide with an enemy
+# Or if an enemy gets offscreen
 col_id = @gamelogic player_collision capability=PlayerCollisionCap() mainthread=true begin
     for body in game_bodies
     	prect = Rect2Df(player.position, player.collision.dimensions)
@@ -156,6 +187,7 @@ col_id = @gamelogic player_collision capability=PlayerCollisionCap() mainthread=
     end
 end
 
+# If there is a collision with the player, we stop the game, we saw enough
 EventNotifiers.connect(PLAYER_COLLISION_ENTER) do body
 	disable_system(col_id)
 	disable_system(ren_id)
@@ -164,6 +196,7 @@ EventNotifiers.connect(PLAYER_COLLISION_ENTER) do body
 	TimerPlugin.clear!(TimerPlugin.TM)
 end
 
+# If an enemy gets offscreen, we delete it
 EventNotifiers.connect(BODY_SCREEN_EXITED) do body
 	for i in eachindex(game_bodies)
 		b = game_bodies[i]
@@ -179,20 +212,28 @@ spawn_enemy()
 
 ################################################### GAME LOGICS #################################################
 
+# This logic is to move the player
 id = @gamelogic player_update capability=PlayerUpdateCap(1, player_up_anim, (false, false)) begin
     dt = LOOP_VAR_REF[].delta_seconds
+
+    # A little trick gamedev like for players with bidirectional movements
 	velocity = iVec2f(IsKeyPressed(win, RIGHT) - IsKeyPressed(win, LEFT), 
 		IsKeyPressed(win, DOWN) - IsKeyPressed(win, UP))
 
+    # Now if the player is moving
     if vnorm(velocity) > 0
-	    velocity = iVec2f((vnormalize(velocity)*player.speed)...)
+	    velocity = iVec2f((vnormalize(velocity)*player.speed)...) # To ensure that if the player move on 2 axis, it won't be to fast
+
+	    # We set the player animation with another wrap trick
 	    player.current_anim = self.capability.current_animation[GDMathLib.wrap(self.capability.current_frame ÷ 10, 1, 2)]
 	    self.capability.current_frame += 1
 	    self.capability.flip = (velocity.x < 0, false)
 	else
+		# If the player isn't moving we just set it to an idle animation
 		player.current_anim = self.capability.current_animation[2]
 	end
 
+    # Then we update the player position
 	player.position += velocity*dt
 	
 	if velocity.y != 0
@@ -203,14 +244,19 @@ id = @gamelogic player_update capability=PlayerUpdateCap(1, player_up_anim, (fal
 
 end
 
+# Now to render the player
 id2 = @gamelogic player_render begin
+    # First we make sure it has been correctly updated
     hasfaileddeps(self) && error("Error while rendering the player. Could not been updated properly")
-    player_update = self.deps[GameCode{:player_update}]
+    player_update = self.deps[GameCode{:player_update}] # Now we access the necessary informations to render the player
 	DrawTexture2D(backend, player.current_anim, Rect2Df(player.position..., 5, 5), 0, player_update.flip)
 end
 
+# Dependency between updating the player and rendering it
 add_dependency!(app.plugins, id, id2)
 
+# Now our main loop.
+# Note that it always run on the main thread
 @gameloop begin
 	LOOP_VAR_REF[].frame_idx % 30 == 0 && spawn_enemy()
 	player_score[] += LOOP_VAR_REF[].frame_idx % 60 == 0
